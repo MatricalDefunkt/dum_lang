@@ -1,4 +1,2 @@
-let:int abc 1
-add abc 10 res
-print res
-exit 1
+print 'wow'
+exit 0
