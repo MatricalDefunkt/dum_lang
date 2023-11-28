@@ -1,2 +1,3 @@
-print 'wow'
+let:int abc 1
+print abc
 exit 0

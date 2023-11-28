@@ -1,188 +1,249 @@
-use std::fmt::Display;
+use std::char;
 
 use regex::Regex;
 
-use crate::utilities::{get_string, is_float, is_int, is_string, is_var};
+use crate::utilities::{is_float, is_int, is_var};
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Types {
+pub enum VarTypes {
     Int,
     Float,
     String,
     Bool,
 }
 
-impl Display for Types {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Types::Int => write!(f, "dd"),
-            Types::Float => write!(f, "dq"),
-            Types::String => write!(f, "db"),
-            Types::Bool => write!(f, "db"),
-        }
-    }
-}
-
 #[derive(Debug, PartialEq, Clone)]
 pub struct VarData {
-    pub var_type: Types,
+    pub var_type: Option<VarTypes>,
     pub var_name: String,
     pub var_value: String,
 }
 
-#[derive(Debug, PartialEq)]
-/**
- * Tokens: Exit, IntLit, Var
- * Exit: exit <exit_code>
- * IntLit: <int_value>
- * Var: let:<var_type> <var_name> <var_value>
- */
-pub enum Tokens {
-    Exit,
-    Var(VarData),
-    Print,
-    Add,
+const PUNCTUATIONS: [char; 9] = [';', ':', ',', '(', ')', '{', '}', '[', ']'];
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum PunctuationType {
+    Semicolon,
+    Colon,
+    Comma,
+    LeftParen,
+    RightParen,
+    // LeftBrace,
+    // RightBrace,
+    // LeftBracket,
+    // RightBracket,
+    DoubleQuote,
 }
 
-#[derive(Debug)]
-pub struct Token {
-    pub token: Tokens,
-    pub value: Option<String>,
+#[derive(Debug, PartialEq, Clone)]
+pub enum Tokens {
+    Let,
+    Exit,
+    Print,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Identifier { name: String },
+    IntegerLiteral { value: i32 },
+    StringLiteral { value: String },
+    FloatLiteral { value: f32 },
+    BoolLiteral { value: bool },
+    Punctuation { value: PunctuationType },
 }
 
 pub const KEYWORDS: [&str; 9] = [
     "let", "exit", "print", "add", "sub", "mul", "div", "true", "false",
 ];
 
-pub fn tokenize(input_string: String) -> Vec<Token> {
-    let mut tokens: Vec<Token> = Vec::new();
+pub struct Tokenizer {
+    tokens: Vec<Tokens>,
+    current_char: char,
+    current_line: u32,
+    current_column: u32,
+    current_index: usize,
+    input_string: String,
+}
 
-    for line in input_string.lines() {
-        let function = line.split(" ").nth(0);
-        let operand1 = line.split(" ").nth(1);
-        let operand2 = line.split(" ").nth(2);
-        // Rest of the line
-        let overflow = line.splitn(4, " ").last().unwrap_or("");
+impl Tokenizer {
+    pub fn new(input_string: String) -> Self {
+        let mut tokenizer = Self {
+            tokens: Vec::new(),
+            current_char: '\0',
+            current_line: 1,
+            current_column: 0,
+            current_index: 0,
+            input_string,
+        };
 
-        if let Some(function) = function {
-            if Regex::new(r"let:[a-z]+").unwrap().is_match(&function) {
-                let var_type = match function.split(":").nth(1).unwrap() {
-                    "int" => Types::Int,
-                    "float" => Types::Float,
-                    "string" => Types::String,
-                    "bool" => Types::Bool,
-                    _ => panic!(
-                        "Invalid variable type: {}",
-                        function.split(":").nth(1).unwrap()
-                    ),
-                };
+        tokenizer.current_char = tokenizer.input_string.chars().nth(0).unwrap_or('\0');
+        tokenizer
+    }
 
-                match var_type {
-                    Types::Int => {
-                        if !is_int(operand2.unwrap().to_string()) {
-                            panic!("Invalid int: {}", operand2.unwrap());
-                        }
-                    }
-                    Types::Float => {
-                        if !is_float(operand2.unwrap().to_string()) {
-                            panic!("Invalid float: {}", operand2.unwrap());
-                        }
-                    }
-                    Types::String => {
-                        let input_string = operand2.unwrap().to_string() + " " + overflow;
+    fn next_char(&mut self) {
+        self.current_index += 1;
+        self.current_column += 1;
+        self.current_char = self
+            .input_string
+            .chars()
+            .nth(self.current_index)
+            .unwrap_or('\0');
+    }
 
-                        if !is_string(input_string) {
-                            panic!("Invalid float: {}", operand2.unwrap());
-                        }
-                    }
-                    Types::Bool => {
-                        if !is_var(operand2.unwrap().to_string()) {
-                            panic!("Invalid bool: {}", operand2.unwrap());
-                        }
-                    }
-                }
+    fn next_line(&mut self) {
+        self.current_line += 1;
+        self.current_column = 0;
 
-                if var_type == Types::String {
-                    operand2.unwrap().to_string().push_str(overflow);
-                    let var_value = operand2.unwrap().to_string() + " " + overflow;
-                    let var_name = operand1.unwrap();
-
-                    if KEYWORDS.contains(&var_name) {
-                        panic!("Reserved variable name: {}", var_name);
-                    }
-
-                    tokens.push(Token {
-                        token: Tokens::Var(VarData {
-                            var_type,
-                            var_name: var_name.to_string(),
-                            var_value: var_value.to_string().replace("'", ""),
-                        }),
-                        value: Some(var_value.to_string()),
-                    });
-                    continue;
-                }
-
-                let var_name = operand1.unwrap();
-                let var_value = operand2.unwrap();
-
-                if KEYWORDS.contains(&var_name) {
-                    panic!("Reserved variable name: {}", var_name);
-                }
-
-                tokens.push(Token {
-                    token: Tokens::Var(VarData {
-                        var_type,
-                        var_name: var_name.to_string(),
-                        var_value: var_value.to_string(),
-                    }),
-                    value: Some(var_value.to_string()),
-                });
-
-                dbg!(var_value);
-            } else if Regex::new(r"exit").unwrap().is_match(&function) {
-                let exit_code = operand1.unwrap();
-                if operand2.is_some() {
-                    panic!("Too many arguments for exit");
-                };
-
-                tokens.push(Token {
-                    token: Tokens::Exit,
-                    value: Some(exit_code.to_string()),
-                });
-            } else if Regex::new(r"add").unwrap().is_match(&function) {
-                tokens.push(Token {
-                    token: Tokens::Add,
-                    value: Some(line.to_string()),
-                });
-            } else if Regex::new(r"print").unwrap().is_match(&function) {
-                if is_string(line.to_string()) {
-                    tokens.push(Token {
-                        token: Tokens::Print,
-                        value: Some(get_string(line.to_string())),
-                    });
-                } else if is_var(operand1.unwrap().to_string()) {
-                    tokens.push(Token {
-                        token: Tokens::Print,
-                        value: Some(operand1.unwrap().to_string()),
-                    });
-                } else if is_int(operand1.unwrap().to_string()) {
-                    tokens.push(Token {
-                        token: Tokens::Print,
-                        value: Some(operand1.unwrap().to_string()),
-                    });
-                } else if is_float(operand1.unwrap().to_string()) {
-                    tokens.push(Token {
-                        token: Tokens::Print,
-                        value: Some(operand1.unwrap().to_string()),
-                    });
-                } else {
-                    panic!("Invalid print: {}", line);
-                }
-            } else {
-                panic!("Invalid function: {}", function);
-            }
+        while self.peek() != '\n' {
+            self.next_char();
         }
     }
 
-    tokens
+    fn peek(&self) -> char {
+        self.input_string
+            .chars()
+            .nth(self.current_index + 1)
+            .unwrap_or('\0')
+    }
+
+    pub fn tokenize(&mut self) -> Vec<Tokens> {
+        let mut buf = String::new();
+
+        while self.peek() != '\0' {
+            if self.current_char == '\n' || self.current_char == ';' {
+                self.next_line();
+            }
+
+            let mut found_string = false;
+
+            while !self.current_char.is_whitespace() {
+                if PUNCTUATIONS.contains(&self.current_char) {
+                    match self.current_char {
+                        ';' => self.tokens.push(Tokens::Punctuation {
+                            value: PunctuationType::Semicolon,
+                        }),
+                        ':' => self.tokens.push(Tokens::Punctuation {
+                            value: PunctuationType::Colon,
+                        }),
+                        ',' => self.tokens.push(Tokens::Punctuation {
+                            value: PunctuationType::Comma,
+                        }),
+                        '(' => self.tokens.push(Tokens::Punctuation {
+                            value: PunctuationType::LeftParen,
+                        }),
+                        ')' => self.tokens.push(Tokens::Punctuation {
+                            value: PunctuationType::RightParen,
+                        }),
+                        // '{' => tokens.push(Tokens::Punctuation {
+                        //     value: PunctuationType::LeftBrace,
+                        // }),
+                        // '}' => tokens.push(Tokens::Punctuation {
+                        //     value: PunctuationType::RightBrace,
+                        // }),
+                        // '[' => tokens.push(Tokens::Punctuation {
+                        //     value: PunctuationType::LeftBracket,
+                        // }),
+                        // ']' => tokens.push(Tokens::Punctuation {
+                        //     value: PunctuationType::RightBracket,
+                        // }),
+                        '"' => {
+                            self.tokens.push(Tokens::Punctuation {
+                                value: PunctuationType::DoubleQuote,
+                            });
+                            self.next_char();
+                            while self.current_char != '"' {
+                                buf.push(self.current_char);
+                                self.next_char();
+
+                                if self.current_char == '\\' {
+                                    self.next_char();
+                                    match self.current_char {
+                                        'n' => buf.push('\n'),
+                                        't' => buf.push('\t'),
+                                        'r' => buf.push('\r'),
+                                        '\\' => buf.push('\\'),
+                                        '"' => buf.push('"'),
+                                        '\'' => buf.push('\''),
+                                        _ => panic!(
+                                            "Unknown escape character: {}",
+                                            self.current_char
+                                        ),
+                                    }
+                                }
+                            }
+                            self.tokens
+                                .push(Tokens::StringLiteral { value: buf.clone() });
+                            self.tokens.push(Tokens::Punctuation {
+                                value: PunctuationType::DoubleQuote,
+                            });
+                            buf.clear();
+                            self.next_char();
+                            found_string = true;
+                            break;
+                        }
+                        _ => panic!("Unknown punctuation: {}", self.current_char),
+                    }
+                    self.next_char();
+                    break;
+                }
+                buf.push(self.current_char);
+                self.next_char();
+            }
+
+            if found_string {
+                continue;
+            }
+
+            if buf.is_empty() {
+                continue;
+            };
+
+            if KEYWORDS.contains(&buf.as_str()) {
+                match buf.as_str() {
+                    "let" => {
+                        self.tokens.insert(self.tokens.len() - 1, Tokens::Let);
+
+                        let mut data_type = String::new();
+
+                        while !self.current_char.is_whitespace()
+                            || PUNCTUATIONS.contains(&self.current_char)
+                        {
+                            data_type.push(self.current_char);
+                            self.next_char();
+                        }
+
+                        self.tokens.push(Tokens::Identifier { name: data_type });
+                    }
+                    "exit" => self.tokens.push(Tokens::Exit),
+                    "print" => self.tokens.push(Tokens::Print),
+                    "add" => self.tokens.push(Tokens::Add),
+                    "sub" => self.tokens.push(Tokens::Sub),
+                    "mul" => self.tokens.push(Tokens::Mul),
+                    "div" => self.tokens.push(Tokens::Div),
+                    "true" => self.tokens.push(Tokens::BoolLiteral { value: true }),
+                    "false" => self.tokens.push(Tokens::BoolLiteral { value: false }),
+                    _ => panic!("Unknown keyword: {}", buf),
+                }
+            } else if is_int(&buf) {
+                self.tokens.push(Tokens::IntegerLiteral {
+                    value: buf.parse::<i32>().unwrap(),
+                });
+            } else if is_float(&buf) {
+                self.tokens.push(Tokens::FloatLiteral {
+                    value: buf.parse::<f32>().unwrap(),
+                });
+            } else if is_var(&buf) {
+                self.tokens.push(Tokens::Identifier { name: buf.clone() });
+            } else if buf.is_empty() {
+                continue;
+            } else {
+                panic!("Unknown token: {}", buf);
+            }
+
+            self.next_char();
+            buf.clear();
+        }
+
+        self.tokens.clone()
+    }
 }
